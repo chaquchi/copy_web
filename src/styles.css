@@ -94,6 +94,26 @@ button, input { font-family: inherit; }
 .new-log-button { position: absolute !important; left: 50%; bottom: 15px; transform: translateX(-50%); box-shadow: 0 7px 20px rgba(64,158,255,.25); }
 .log-footer { min-height: 34px; display: flex; align-items: center; gap: 24px; padding: 0 16px; border-top: 1px solid #e5eaf0; color: #8794a5; background: #fafbfd; font-size: 10px; }
 
+.help-intro { margin-bottom: 14px; }
+.help-tools { display: flex; gap: 10px; margin-bottom: 12px; }
+.help-tools .el-input { flex: 1; }
+.help-legend { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.help-legend > span:last-child { margin-left: auto; color: #8492a6; font-size: 11px; }
+.command-library { display: grid; gap: 10px; padding-bottom: 12px; }
+.command-help-item { display: flex; align-items: center; gap: 16px; padding: 14px 15px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fbfcfe; transition: .15s; }
+.command-help-item:hover { border-color: #b9d7f8; box-shadow: 0 4px 14px rgba(64,158,255,.08); }
+.command-help-main { min-width: 0; flex: 1; }
+.command-help-title { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.command-help-title strong { color: #2b3e56; font-size: 13px; }
+.command-help-main > code { display: inline-block; max-width: 100%; padding: 5px 8px; border-radius: 4px; color: #245f9e; background: #eaf3ff; font: 11px "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.command-help-main p { margin: 8px 0 0; color: #66768a; font-size: 11px; line-height: 1.6; }
+.command-help-main small { display: block; margin-top: 6px; color: #8a96a6; }
+.command-help-main small code, .help-footer code { color: #337ecc; font-family: "SFMono-Regular", Consolas, monospace; }
+.command-help-actions { flex: 0 0 214px; display: flex; justify-content: flex-end; gap: 6px; }
+.help-footer { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 20px; text-align: left; }
+.help-footer span { color: #7c8999; font-size: 11px; line-height: 1.5; }
+.command-help-drawer .el-drawer__body { padding-top: 8px; }
+
 .collector-form { margin-top: 18px; }
 .pane-option { display: flex; align-items: center; gap: 12px; width: 100%; }
 .pane-option strong { color: #337ecc; }

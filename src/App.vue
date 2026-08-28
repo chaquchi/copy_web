@@ -12,6 +12,7 @@
         <el-tag :type="socketTagType" effect="light" round>
           <span class="status-dot" :class="socketState"></span>{{ socketText }}
         </el-tag>
+        <el-button :icon="Collection" @click="commandHelpVisible = true">仿真指令帮助</el-button>
         <el-button type="primary" :icon="Connection" @click="openCollectorDialog">连接终端</el-button>
       </div>
     </header>
@@ -116,7 +117,9 @@
                 <el-dropdown-item command="Tab">Tab（补全）</el-dropdown-item>
                 <el-dropdown-item command="Up">↑ 上一条终端记录</el-dropdown-item>
                 <el-dropdown-item command="Down">↓ 下一条终端记录</el-dropdown-item>
-                <el-dropdown-item command="C-d" divided>Ctrl+D（EOF）</el-dropdown-item>
+                <el-dropdown-item command="raw:q" divided>Q（退出 top 等交互视图）</el-dropdown-item>
+                <el-dropdown-item command="Escape">Esc</el-dropdown-item>
+                <el-dropdown-item command="C-d">Ctrl+D（EOF）</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -157,6 +160,61 @@
       </el-card>
     </main>
 
+    <el-drawer v-model="commandHelpVisible" title="仿真快捷指令与帮助" size="820px" class="command-help-drawer">
+      <div class="help-intro">
+        <el-alert title="请先确认指令运行环境" type="warning" show-icon :closable="false">
+          <template #default>PX4 指令发送到已连接的 PX4 Shell；Ubuntu 指令仅供复制参考，不能直接发送到正在运行的 PX4 控制台。</template>
+        </el-alert>
+      </div>
+      <div class="help-tools">
+        <el-input v-model="commandSearch" :prefix-icon="Search" clearable placeholder="搜索指令、用途或关键词" />
+        <el-select v-model="commandCategory" style="width: 180px">
+          <el-option v-for="category in commandCategories" :key="category.value" :label="category.label" :value="category.value" />
+        </el-select>
+      </div>
+      <div class="help-legend">
+        <el-tag type="success" effect="light">查询类，可直接发送</el-tag>
+        <el-tag type="danger" effect="light">会改变仿真状态，发送前确认</el-tag>
+        <el-tag type="info" effect="light">Ubuntu Shell，仅复制参考</el-tag>
+        <span>共 {{ filteredCommands.length }} 条</span>
+      </div>
+      <div class="command-library">
+        <el-empty v-if="!filteredCommands.length" description="没有找到相关指令" />
+        <div v-for="item in filteredCommands" :key="`${item.category}-${item.command}`" class="command-help-item">
+          <div class="command-help-main">
+            <div class="command-help-title">
+              <strong>{{ item.title }}</strong>
+              <el-tag size="small" :type="item.context === 'host' ? 'info' : item.danger ? 'danger' : 'success'" effect="light">
+                {{ item.context === 'host' ? 'Ubuntu Shell' : item.danger ? '谨慎操作' : 'PX4 Shell' }}
+              </el-tag>
+              <el-tag v-if="item.template" size="small" type="warning" effect="plain">需要替换占位符</el-tag>
+            </div>
+            <code>{{ item.command }}</code>
+            <p>{{ item.description }}</p>
+            <small v-if="item.example">示例：<code>{{ item.example }}</code></small>
+          </div>
+          <div class="command-help-actions">
+            <el-button size="small" :icon="CopyDocument" @click="copyCommand(item.command)">复制</el-button>
+            <el-button v-if="item.context === 'px4'" size="small" :icon="EditPen" @click="fillCommand(item)">填入</el-button>
+            <el-button
+              v-if="item.context === 'px4' && !item.template"
+              size="small"
+              :type="item.danger ? 'danger' : 'primary'"
+              plain
+              :disabled="!commandSource"
+              @click="sendLibraryCommand(item)"
+            >直接发送</el-button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="help-footer">
+          <span>不同 PX4 版本的模块和参数可能存在差异，遇到未知命令时优先执行 <code>help -v</code> 或 <code>模块名 help</code>。</span>
+          <el-button @click="commandHelpVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-drawer>
+
     <el-dialog v-model="collectorDialogVisible" title="连接 tmux 终端" width="640px" destroy-on-close>
       <el-alert title="平台将自动导入历史并持续采集新输出，不会停止或重启仿真。" type="info" show-icon :closable="false" />
       <el-form :model="collectorForm" label-position="top" class="collector-form">
@@ -191,9 +249,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  ArrowDown, Bottom, Clock, Connection, CopyDocument, DataLine, Document, Link,
-  Monitor, Position, Promotion, Refresh, Search, Timer
+  ArrowDown, Bottom, Clock, Collection, Connection, CopyDocument, DataLine, Document,
+  EditPen, Link, Monitor, Position, Promotion, Refresh, Search, Timer
 } from '@element-plus/icons-vue';
+import { commandCategories, simulationCommands } from './commands';
 
 const entries = ref([]);
 const entrySequences = new Set();
@@ -218,6 +277,9 @@ const collectorForm = reactive({ source: 'combined', target: '', historyLines: 2
 const commandSource = ref('');
 const commandText = ref('');
 const sendingCommand = ref(false);
+const commandHelpVisible = ref(false);
+const commandSearch = ref('');
+const commandCategory = ref('all');
 const commandHistory = ref([]);
 let commandHistoryIndex = -1;
 const rowHeight = 30;
@@ -239,6 +301,13 @@ const levelOptions = [
   { label: 'DEBUG', value: 'debug' }
 ];
 
+const filteredCommands = computed(() => {
+  const needle = commandSearch.value.trim().toLocaleLowerCase();
+  return simulationCommands.filter((item) => {
+    if (commandCategory.value !== 'all' && item.category !== commandCategory.value) return false;
+    return !needle || `${item.title} ${item.command} ${item.description} ${item.keywords || ''}`.toLocaleLowerCase().includes(needle);
+  });
+});
 const filteredEntries = computed(() => {
   const needle = searchText.value.trim().toLocaleLowerCase();
   return entries.value.filter((entry) => {
@@ -403,6 +472,10 @@ async function executeCommand() {
 }
 
 async function sendSpecialKey(key) {
+  if (key === 'raw:q') {
+    if (await sendTerminalInput({ text: 'q', enter: false })) ElMessage.success('已向终端发送 Q');
+    return;
+  }
   if (key === 'C-c' || key === 'C-d') {
     try {
       await ElMessageBox.confirm(
@@ -438,6 +511,32 @@ function handleCommandKeydown(event) {
     });
     else sendTerminalInput({ key: 'Tab' });
   }
+}
+
+async function copyCommand(command) {
+  try {
+    await navigator.clipboard.writeText(command);
+    ElMessage.success('指令已复制');
+  } catch { ElMessage.error('复制失败，请检查浏览器剪贴板权限'); }
+}
+
+function fillCommand(item) {
+  commandText.value = item.example || item.command;
+  commandHelpVisible.value = false;
+  ElMessage.success('指令已填入输入框，请确认后发送');
+}
+
+async function sendLibraryCommand(item) {
+  if (item.danger) {
+    try {
+      await ElMessageBox.confirm(`即将向 ${commandSource.value} 发送：${item.command}\n\n${item.description}`, '确认仿真操作', {
+        type: 'warning', confirmButtonText: '确定发送', cancelButtonText: '取消'
+      });
+    } catch { return; }
+  }
+  commandText.value = item.command;
+  commandHelpVisible.value = false;
+  await executeCommand();
 }
 
 async function copyFilteredLogs() {
