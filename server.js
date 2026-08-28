@@ -117,6 +117,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    const inputMatch = pathname.match(/^\/api\/collectors\/(combined|px4|gazebo)\/input$/);
+    if (request.method === 'POST' && inputMatch) {
+      const body = await readJson(request, 16 * 1024);
+      const result = await tmuxManager.sendInput(inputMatch[1], body);
+      sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+
     const detachMatch = pathname.match(/^\/api\/collectors\/(combined|px4|gazebo)$/);
     if (request.method === 'DELETE' && detachMatch) {
       await tmuxManager.detach(detachMatch[1]);

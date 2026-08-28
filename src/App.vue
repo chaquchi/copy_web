@@ -94,6 +94,34 @@
           <el-switch v-model="follow" @change="onFollowChange" />
         </div>
 
+        <div class="command-bar">
+          <div class="command-prompt"><span>&gt;_</span></div>
+          <el-select v-model="commandSource" class="command-source" placeholder="选择终端" :disabled="!collectors.length">
+            <el-option v-for="collector in collectors" :key="collector.source" :value="collector.source" :label="`${sourceShortLabel(collector.source)} · ${collector.target}`" />
+          </el-select>
+          <el-input
+            v-model="commandText"
+            class="command-input"
+            placeholder="输入 PX4 或终端指令，按 Enter 发送"
+            clearable
+            :disabled="!commandSource"
+            @keydown="handleCommandKeydown"
+          />
+          <el-button type="primary" :icon="Promotion" :loading="sendingCommand" :disabled="!commandSource || !commandText" @click="executeCommand">发送</el-button>
+          <el-dropdown trigger="click" @command="sendSpecialKey">
+            <el-button :disabled="!commandSource">终端按键<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="C-c">Ctrl+C（中断当前任务）</el-dropdown-item>
+                <el-dropdown-item command="Tab">Tab（补全）</el-dropdown-item>
+                <el-dropdown-item command="Up">↑ 上一条终端记录</el-dropdown-item>
+                <el-dropdown-item command="Down">↓ 下一条终端记录</el-dropdown-item>
+                <el-dropdown-item command="C-d" divided>Ctrl+D（EOF）</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+
         <div class="terminal-frame">
           <div class="terminal-header">
             <span>时间</span><span>来源</span><span>等级</span><span>终端消息</span>
@@ -161,10 +189,10 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  Bottom, Clock, Connection, CopyDocument, DataLine, Document, Link,
-  Monitor, Position, Refresh, Search, Timer
+  ArrowDown, Bottom, Clock, Connection, CopyDocument, DataLine, Document, Link,
+  Monitor, Position, Promotion, Refresh, Search, Timer
 } from '@element-plus/icons-vue';
 
 const entries = ref([]);
@@ -187,6 +215,11 @@ const collectorDialogVisible = ref(false);
 const panesLoading = ref(false);
 const attaching = ref(false);
 const collectorForm = reactive({ source: 'combined', target: '', historyLines: 2000 });
+const commandSource = ref('');
+const commandText = ref('');
+const sendingCommand = ref(false);
+const commandHistory = ref([]);
+let commandHistoryIndex = -1;
 const rowHeight = 30;
 let socket;
 let reconnectTimer;
@@ -334,8 +367,77 @@ async function detachCollector(source) {
   try {
     await requestJson(`/api/collectors/${source}`, { method: 'DELETE' });
     collectors.value = collectors.value.filter((item) => item.source !== source);
+    if (commandSource.value === source) commandSource.value = collectors.value[0]?.source || '';
     ElMessage.success('已停止采集，仿真不会受到影响');
   } catch (error) { ElMessage.error(error.message); }
+}
+
+async function sendTerminalInput(payload) {
+  if (!commandSource.value) return ElMessage.warning('请先连接并选择一个终端');
+  sendingCommand.value = true;
+  try {
+    await requestJson(`/api/collectors/${commandSource.value}/input`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (error) {
+    ElMessage.error(error.message);
+    return false;
+  } finally {
+    sendingCommand.value = false;
+  }
+}
+
+async function executeCommand() {
+  const command = commandText.value;
+  if (!command) return;
+  if (await sendTerminalInput({ text: command, enter: true })) {
+    if (commandHistory.value.at(-1) !== command) commandHistory.value.push(command);
+    if (commandHistory.value.length > 100) commandHistory.value.shift();
+    commandHistoryIndex = commandHistory.value.length;
+    commandText.value = '';
+    follow.value = true;
+    nextTick(() => scrollToBottom(true));
+  }
+}
+
+async function sendSpecialKey(key) {
+  if (key === 'C-c' || key === 'C-d') {
+    try {
+      await ElMessageBox.confirm(
+        key === 'C-c' ? 'Ctrl+C 可能中断当前 PX4/Gazebo 仿真进程，确定发送吗？' : 'Ctrl+D 可能退出当前终端或程序，确定发送吗？',
+        '确认终端操作',
+        { type: 'warning', confirmButtonText: '确定发送', cancelButtonText: '取消' }
+      );
+    } catch { return; }
+  }
+  if (await sendTerminalInput({ key })) ElMessage.success(`已向终端发送 ${key}`);
+}
+
+function handleCommandKeydown(event) {
+  if (event.key === 'Enter' && !event.isComposing) {
+    event.preventDefault();
+    executeCommand();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (!commandHistory.value.length) return;
+    commandHistoryIndex = Math.max(0, commandHistoryIndex - 1);
+    commandText.value = commandHistory.value[commandHistoryIndex] || '';
+  } else if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    commandHistoryIndex = Math.min(commandHistory.value.length, commandHistoryIndex + 1);
+    commandText.value = commandHistory.value[commandHistoryIndex] || '';
+  } else if (event.key === 'Tab') {
+    event.preventDefault();
+    if (commandText.value) sendTerminalInput({ text: commandText.value, enter: false }).then((sent) => {
+      if (sent) {
+        commandText.value = '';
+        sendTerminalInput({ key: 'Tab' });
+      }
+    });
+    else sendTerminalInput({ key: 'Tab' });
+  }
 }
 
 async function copyFilteredLogs() {
@@ -366,6 +468,9 @@ function relativeTime(value) {
 }
 
 watch([sourceFilter, levelFilter, searchText], () => nextTick(() => { if (follow.value) scrollToBottom(false); }));
+watch(collectors, (value) => {
+  if (!value.some((item) => item.source === commandSource.value)) commandSource.value = value[0]?.source || '';
+}, { deep: true, immediate: true });
 onMounted(() => {
   connectWebSocket();
   relativeTimer = setInterval(() => { nowTick.value = Date.now(); }, 5000);
