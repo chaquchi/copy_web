@@ -1,138 +1,125 @@
-# PX4 / Gazebo 局域网实时日志平台
+# PX4 / Gazebo 仿真日志平台 2.0
 
-一个只读的终端日志查看器。仿真与 Gazebo 图形界面继续运行在仿真电脑上，控制电脑通过浏览器实时查看、筛选和复制 PX4/Gazebo 输出。
+基于 Vue 3、Element Plus、Node.js 和 tmux 的局域网实时日志平台。后端自动连接已有 tmux 窗格，不再要求用户手工维护 `curl`、`capture-pane` 或 `pipe-pane` 命令。
 
-## 已实现
+## 功能
 
-- PX4、Gazebo 和混合日志视图
-- WebSocket 实时刷新
-- 用户向上滚动时自动暂停跟随，并提示新日志数量
-- 回到底部后自动恢复跟随
+- Vue 3 + Element Plus 浅色界面
+- 自动发现所有 tmux 会话、窗口和窗格
+- 在网页选择窗格并开始采集
+- 自动导入指定数量的 tmux 历史日志
+- 自动采集后续实时输出
+- 采集进程断开后自动恢复
+- PX4、Gazebo、PX4/Gazebo 混合来源
 - ERROR、WARN、INFO、DEBUG 分色
-- 鼠标选择复制，以及一键复制当前筛选结果
-- 来源、等级和关键字筛选
-- 1/2/5/10 秒退避重连
-- 按日志序号补发断线期间的信息
+- 智能自动滚动；向上查看历史时暂停跟随
+- 搜索、来源筛选、等级筛选和复制
+- 虚拟列表，避免大量日志造成页面卡顿
+- 标准 `ws` WebSocket、心跳和浏览器断线续传
 - 每个来源默认保留最近 10,000 行内存日志
-- 不写入磁盘，服务重启后自动清空
+- 日志不写入磁盘；服务重启后清空
+- 只保存 tmux 目标配置，以便服务重启后自动恢复采集
 
-## 环境要求
+## 环境
 
-- 仿真电脑：Linux、Node.js 18+、npm、curl
-- 两台电脑在同一个局域网，并允许访问仿真电脑的服务端口
+- Ubuntu/Linux
+- Node.js 18 或更高版本（推荐使用当前 LTS）
+- tmux
 
-## 安装与启动
-
-在仿真电脑上执行：
+检查：
 
 ```bash
+node -v
+npm -v
+tmux -V
+```
+
+## 安装和启动
+
+```bash
+cd ~/web/copy_web
 npm install
 npm start
 ```
 
-默认监听所有网卡的 `8080` 端口。查看仿真电脑 IP：
+`npm start` 会先构建 Vue 页面，再启动 Node 服务。
+
+启动成功：
+
+```text
+PX4/Gazebo 日志平台：http://0.0.0.0:8080
+日志仅保存在内存中，每个来源最多 10000 行。
+```
+
+控制电脑访问：
+
+```text
+http://仿真电脑局域网IP:8080
+```
+
+查看 IP：
 
 ```bash
 hostname -I
 ```
 
-假设 IP 为 `192.168.1.120`，控制电脑访问：
-
-```text
-http://192.168.1.120:8080
-```
-
-如果启用了防火墙：
+如有防火墙：
 
 ```bash
 sudo ufw allow 8080/tcp
 ```
 
-## 采集终端日志
+## 使用
 
-首先赋予辅助脚本执行权限：
+1. 保持 PX4/Gazebo 在 tmux 中正常运行。
+2. 打开 Web 页面。
+3. 点击右上角“连接终端”。
+4. 选择日志来源：
+   - 如果 `make px4_sitl gz_x500` 在同一窗格中运行，选择“PX4 / Gazebo 混合”。
+   - 独立 PX4 窗格选择“PX4”。
+   - 独立 Gazebo 窗格选择“Gazebo”。
+5. 选择例如 `px4:0.0` 的 tmux 窗格。
+6. 设置首次导入历史行数，点击“连接并开始采集”。
 
-```bash
-chmod +x scripts/stream-log.sh
-```
-
-### 采集 PX4
-
-用辅助脚本包裹原来的启动命令：
-
-```bash
-./scripts/stream-log.sh px4 bash -lc 'cd ~/PX4-Autopilot && make px4_sitl gz_x500'
-```
-
-### 采集独立 Gazebo 命令
-
-```bash
-./scripts/stream-log.sh gazebo bash -lc '你的 Gazebo 启动命令'
-```
-
-辅助脚本通过 `tee` 保留仿真电脑本地终端输出，同时发送一份到网页。stdout 与 stderr 分开采集；没有等级标识的 stderr 默认显示为 ERROR。
-
-如果日志服务不在本机，可指定地址：
-
-```bash
-LOG_SERVER_URL=http://192.168.1.120:8080 \
-  ./scripts/stream-log.sh px4 bash -lc '你的 PX4 命令'
-```
-
-> 如果 `make px4_sitl gz_x500` 同时启动 PX4 和 Gazebo，它们的合并输出会被归入 PX4 标签。只有使用两个独立命令启动和采集时，网页才能严格区分两个来源。
-
-## 另一种方式：由服务端启动命令
-
-也可以通过环境变量让日志服务直接启动并捕获命令：
-
-```bash
-PX4_COMMAND='cd ~/PX4-Autopilot && make px4_sitl gz_x500' npm start
-```
-
-独立启动两个进程：
-
-```bash
-PX4_COMMAND='你的 PX4 命令' \
-GAZEBO_COMMAND='你的 Gazebo 命令' \
-npm start
-```
-
-这种方式适合无人值守运行，但命令随日志服务一起结束。通常更推荐使用 `scripts/stream-log.sh`，便于在仿真电脑上直接控制进程。
+平台会自动清除该窗格遗留的旧 `pipe-pane`，然后由后端统一管理实时采集。不会停止或重启仿真。
 
 ## 配置
 
 ```bash
-HOST=0.0.0.0 \
-PORT=8080 \
-MAX_LINES_PER_SOURCE=10000 \
-npm start
+HOST=0.0.0.0 PORT=8080 MAX_LINES_PER_SOURCE=10000 npm start
 ```
 
-| 环境变量 | 默认值 | 说明 |
+| 变量 | 默认值 | 说明 |
 |---|---:|---|
 | `HOST` | `0.0.0.0` | 监听地址 |
-| `PORT` | `8080` | Web 服务端口 |
-| `MAX_LINES_PER_SOURCE` | `10000` | 每个来源的内存日志行数上限 |
-| `PX4_COMMAND` | 空 | 可选，由服务端启动的 PX4 命令 |
-| `GAZEBO_COMMAND` | 空 | 可选，由服务端启动的 Gazebo 命令 |
+| `PORT` | `8080` | 服务端口 |
+| `MAX_LINES_PER_SOURCE` | `10000` | 每个来源内存行数上限 |
+| `CONFIG_PATH` | `data/config.json` | tmux 采集目标配置文件 |
 
-## 接口
+`data/config.json` 只保存采集目标和历史行数，不保存终端日志。
 
-- `GET /`：日志页面
-- `GET /ws`：WebSocket 日志流
-- `GET /api/status`：服务状态
-- `POST /api/ingest/px4?streaming=1`：流式接收 PX4 文本
-- `POST /api/ingest/gazebo?streaming=1`：流式接收 Gazebo 文本
+## 开发模式
 
-## 当前日志策略
+终端一：
 
-当前版本只采用有上限的服务端内存环形缓冲：
+```bash
+npm run serve
+```
 
-- 不建立数据库
-- 不生成永久日志文件
-- 页面刷新时可重新获取服务端仍保留的日志
-- 网络重连时按序号补发日志
-- 超出缓冲范围时，页面明确提示无法恢复的数量
-- 服务进程或仿真电脑重启后，历史终端日志清空
+终端二：
 
-PX4 自身产生的 `.ulg` 飞行日志不属于本模块的终端日志，不会被修改或管理。
+```bash
+npm run dev
+```
+
+开发页面：
+
+```text
+http://127.0.0.1:5173
+```
+
+## 当前边界
+
+如果 PX4 与 Gazebo 输出来自同一个 tmux pane，平台无法从操作系统层面可靠判断每一行的真实进程来源，因此应使用“PX4 / Gazebo 混合终端”。等级仍会根据日志内容自动识别。
+
+PX4 自己生成的 `.ulg` 飞行日志不属于本平台的终端日志，不会被修改或管理。

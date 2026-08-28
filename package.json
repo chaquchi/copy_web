@@ -1,15 +1,26 @@
 {
   "name": "px4-gazebo-log-console",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "LAN real-time PX4 and Gazebo log viewer",
+  "description": "Vue 3 + Element Plus PX4/Gazebo tmux log console",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test"
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "serve": "node server.js",
+    "start": "npm run build && node server.js"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "element-plus": "^2.11.3",
+    "vue": "^3.5.21",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^5.4.19"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.0.0"
   }
 }
